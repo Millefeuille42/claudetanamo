@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_ROOT="$(pwd)"
+JAIL_DATA_DIR="${PROJECT_ROOT}/.claudetanamo"
+IMAGE_TAG="claudetanamo:latest"
+
+# claude statefile
+mkdir -p "${JAIL_DATA_DIR}/state"
+chmod 700 "${JAIL_DATA_DIR}"
+
+# ensure the data dir is excluded
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  GIT_DIR="$(git rev-parse --git-dir)"
+  EXCLUDE_FILE="${GIT_DIR}/info/exclude"
+  mkdir -p "$(dirname "${EXCLUDE_FILE}")"
+  if ! grep -qxF "/.claudetanamo" "${EXCLUDE_FILE}" 2>/dev/null; then
+    echo "/.claudetanamo" >> "${EXCLUDE_FILE}"
+  fi
+fi
+
+RUNTIME_ENV_FLAGS=()
+
+# log in using api key
+if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+  RUNTIME_ENV_FLAGS+=("-e" "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}")
+fi
+
+# forward git committer identity
+HOST_GIT_USER="$(git config user.name 2>/dev/null || true)"
+HOST_GIT_EMAIL="$(git config user.email 2>/dev/null || true)"
+
+if [[ -n "${HOST_GIT_USER}" ]]; then
+  RUNTIME_ENV_FLAGS+=(
+    "-e" "GIT_AUTHOR_NAME=${HOST_GIT_USER}"
+    "-e" "GIT_COMMITTER_NAME=${HOST_GIT_USER}"
+  )
+fi
+
+if [[ -n "${HOST_GIT_EMAIL}" ]]; then
+  RUNTIME_ENV_FLAGS+=(
+    "-e" "GIT_AUTHOR_EMAIL=${HOST_GIT_EMAIL}"
+    "-e" "GIT_COMMITTER_EMAIL=${HOST_GIT_EMAIL}"
+  )
+fi
+
+# verify the anchor exists in pf
+if ! sudo pfctl -s Anchors 2>/dev/null | grep -q "claudetanamo"; then
+  echo "[!] Loading perimeter rules into pfctl..."
+  sudo pfctl -a claudetanamo -f /etc/pf.anchors/claudetanamo
+fi
+
+# create a temporary IPC directory to receive the guest IP upon boot
+IPC_DIR="$(mktemp -d /tmp/claudetanamo.XXXXXX)"
+chmod 777 "${IPC_DIR}"
+IP_FILE="${IPC_DIR}/guest_ip"
+
+cleanup() {
+  local exit_code=$?
+  local target_ip=""
+
+  if [[ -f "${IP_FILE}" && -s "${IP_FILE}" ]]; then
+    target_ip="$(head -n1 "${IP_FILE}" | tr -d ' \r\n')"
+  fi
+
+  if [[ -n "${target_ip}" ]]; then
+    echo -e "\n[+] Removing ${target_ip} from pf..."
+    sudo pfctl -t claudetanamo_inmates -T delete "${target_ip}" 2>/dev/null || true
+  fi
+  rm -rf "${IPC_DIR}"
+  exit "${exit_code}"
+}
+trap cleanup EXIT INT TERM
+
+# in background: read ip from ipc file and send it to pf jail
+(
+  for _ in {1..50}; do
+    if [[ -s "${IP_FILE}" ]]; then
+      FOUND_IP="$(head -n1 "${IP_FILE}" | tr -d ' \r\n')"
+      if [[ -n "${FOUND_IP}" ]]; then
+        echo "[+] Cell IP discovered: ${FOUND_IP}"
+        echo "[+] Applying firewall jail..."
+        sudo pfctl -t claudetanamo_inmates -T add "${FOUND_IP}" >/dev/null 2>&1 || true
+        break
+      fi
+    fi
+    sleep 0.1
+  done
+) &
+
+CONTAINER_LABEL="claudetanamo-$(date +%s)"
+echo "[+] Launching session (${CONTAINER_LABEL})..."
+
+container run -it --rm \
+  --name "${CONTAINER_LABEL}" \
+  --user "$(id -u):$(id -g)" \
+  --cap-drop=ALL \
+  --cpus 4 \
+  --memory 4g \
+  -v "${PROJECT_ROOT}":/workspace \
+  -v "${IPC_DIR}":/run/claudetanamo \
+  -w /workspace \
+  -e HOME=/home/prisoner \
+  -e CLAUDE_CONFIG_DIR=/workspace/.claudetanamo/state \
+  -e TERM="${TERM:-xterm-256color}" \
+  "${RUNTIME_ENV_FLAGS[@]}" \
+  "${IMAGE_TAG}" \
+  "$@"
