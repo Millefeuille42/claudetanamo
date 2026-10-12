@@ -16,6 +16,13 @@ sleep 0.1
 
 git config --global --add safe.directory /workspace
 
+MANIFEST=""
+if [[ -f "/workspace/.claudetanamo/tools.nix" ]]; then
+  MANIFEST="/workspace/.claudetanamo/tools.nix"
+elif [[ -f "/workspace/shell.nix" ]]; then
+  MANIFEST="/workspace/shell.nix"
+fi
+
 HAS_PERMISSION_MODE=false
 for arg in "$@"; do
   case "$arg" in
@@ -30,4 +37,9 @@ if [[ "$HAS_PERMISSION_MODE" == false ]]; then
   set -- --permission-mode plan "$@"
 fi
 
-exec claude "$@"
+if [[ -n "$MANIFEST" ]]; then
+  echo "[+] Activating user environment from ${MANIFEST}..."
+  exec nix-shell "$MANIFEST" --run "exec claude $(printf '%q ' "$@")"
+else
+  exec claude "$@"
+fi

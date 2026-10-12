@@ -15,8 +15,13 @@ if ! command -v container >/dev/null 2>&1; then
 fi
 
 if ! container system status >/dev/null 2>&1; then
-  echo "[+] Container system is stopped. Starting..."
+  echo "[+] Starting container system..."
   container system start
+
+  echo "[+] Waiting for container system readiness..."
+  until container system status >/dev/null 2>&1; do
+    sleep 0.5
+  done
 fi
 
 echo "[+] Constructing cell image ($IMAGE_TAG)..."
@@ -29,13 +34,12 @@ container build \
   -t "$IMAGE_TAG" \
   -f "$ROOT_DIR/Containerfile" \
   "$ROOT_DIR"
-container build -t "$IMAGE_TAG" -f "$ROOT_DIR/Containerfile" "$ROOT_DIR"
 
 echo "[+] Installing macOS pf anchor configuration..."
 sudo cp "$ANCHOR_SRC" "$ANCHOR_DEST"
 sudo chmod 644 "$ANCHOR_DEST"
 
-# 4. Register anchor in /etc/pf.conf if missing
+# register anchor in /etc/pf.conf if missing
 if ! grep -q 'anchor "claudetanamo"' /etc/pf.conf 2>/dev/null; then
   echo "[+] Registering anchor in /etc/pf.conf..."
   sudo cp /etc/pf.conf "/etc/pf.conf.backup.$(date +%Y%m%d%H%M%S)"
@@ -45,8 +49,9 @@ if ! grep -q 'anchor "claudetanamo"' /etc/pf.conf 2>/dev/null; then
   echo 'load anchor "claudetanamo" from "/etc/pf.anchors/claudetanamo"' | sudo tee -a /etc/pf.conf >/dev/null
 fi
 
-echo "[+] Loading packet filter rules and creating <claudetanamo_inmates> table..."
+echo "[+] Loading packet filter rules..."
 sudo pfctl -vnf /etc/pf.conf
 sudo pfctl -a claudetanamo -f "$ANCHOR_DEST"
 sudo pfctl -e 2>/dev/null || true
 
+echo "=== Setup complete! ==="

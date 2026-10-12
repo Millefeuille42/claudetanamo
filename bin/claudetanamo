@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SOURCE_BIN="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE_BIN" ]]; do
+  BIN_DIR="$(cd -P "$(dirname "$SOURCE_BIN")" && pwd)"
+  SOURCE_BIN="$(readlink "$SOURCE_BIN")"
+  [[ $SOURCE_BIN != /* ]] && SOURCE_BIN="$BIN_DIR/$SOURCE_BIN"
+done
+CLAUDETANAMO_REPO="$(cd -P "$(dirname "$SOURCE_BIN")/.." && pwd)"
+DEFAULTS_DIR="${CLAUDETANAMO_REPO}/defaults"
+
 PROJECT_ROOT="$(pwd)"
 JAIL_DATA_DIR="${PROJECT_ROOT}/.claudetanamo"
 IMAGE_TAG="claudetanamo:latest"
 
-# claude statefile
-mkdir -p "${JAIL_DATA_DIR}/state"
+mkdir -p "${JAIL_DATA_DIR}/state/skills"
 chmod 700 "${JAIL_DATA_DIR}"
 
-# ensure the data dir is excluded
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   GIT_DIR="$(git rev-parse --git-dir)"
   EXCLUDE_FILE="${GIT_DIR}/info/exclude"
@@ -19,29 +26,19 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   fi
 fi
 
+if [[ -f "${DEFAULTS_DIR}/CLAUDE.md" ]]; then
+  cp -n "${DEFAULTS_DIR}/CLAUDE.md" "${JAIL_DATA_DIR}/state/CLAUDE.md"
+fi
+
+if [[ -d "${DEFAULTS_DIR}/skills" ]]; then
+  cp -rn "${DEFAULTS_DIR}/skills/"* "${JAIL_DATA_DIR}/state/skills/" 2>/dev/null || true
+fi
+
 RUNTIME_ENV_FLAGS=()
 
 # log in using api key
 if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
   RUNTIME_ENV_FLAGS+=("-e" "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}")
-fi
-
-# forward git committer identity
-HOST_GIT_USER="$(git config user.name 2>/dev/null || true)"
-HOST_GIT_EMAIL="$(git config user.email 2>/dev/null || true)"
-
-if [[ -n "${HOST_GIT_USER}" ]]; then
-  RUNTIME_ENV_FLAGS+=(
-    "-e" "GIT_AUTHOR_NAME=${HOST_GIT_USER}"
-    "-e" "GIT_COMMITTER_NAME=${HOST_GIT_USER}"
-  )
-fi
-
-if [[ -n "${HOST_GIT_EMAIL}" ]]; then
-  RUNTIME_ENV_FLAGS+=(
-    "-e" "GIT_AUTHOR_EMAIL=${HOST_GIT_EMAIL}"
-    "-e" "GIT_COMMITTER_EMAIL=${HOST_GIT_EMAIL}"
-  )
 fi
 
 # verify the anchor exists in pf
@@ -64,7 +61,7 @@ cleanup() {
   fi
 
   if [[ -n "${target_ip}" ]]; then
-    echo -e "\n[+] Removing ${target_ip} from pf..."
+    printf "\n[+] Removing %s from pf jail...\n" "${target_ip}"
     sudo pfctl -t claudetanamo_inmates -T delete "${target_ip}" 2>/dev/null || true
   fi
   rm -rf "${IPC_DIR}"
@@ -78,8 +75,7 @@ trap cleanup EXIT INT TERM
     if [[ -s "${IP_FILE}" ]]; then
       FOUND_IP="$(head -n1 "${IP_FILE}" | tr -d ' \r\n')"
       if [[ -n "${FOUND_IP}" ]]; then
-        echo "[+] Cell IP discovered: ${FOUND_IP}"
-        echo "[+] Applying firewall jail..."
+        printf "[+] Cell IP discovered: %s\n" "${FOUND_IP}"
         sudo pfctl -t claudetanamo_inmates -T add "${FOUND_IP}" >/dev/null 2>&1 || true
         break
       fi
@@ -99,6 +95,7 @@ container run -it --rm \
   --memory 4g \
   -v "${PROJECT_ROOT}":/workspace \
   -v "${IPC_DIR}":/run/claudetanamo \
+  -v "${JAIL_DATA_DIR}/state/skills":/home/prisoner/.config/claude/skills \
   -w /workspace \
   -e HOME=/home/prisoner \
   -e CLAUDE_CONFIG_DIR=/workspace/.claudetanamo/state \

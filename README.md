@@ -19,3 +19,6 @@ Once done run `claudetanamo` in your project directory, you will be prompted to 
 
 It is possible change from plan mode to RW modes, either when running claude interactively (without any arguments) 
 or by providing any of those two flags `--permission-mode <mode>` or `--dangerously-skip-permissions`.
+
+It is possible to provide the container with runtime-installed packages with the `.claudetanamo/tools.nix` file, some pre-made templates for specific languages were made as well as 
+a generic demo one.

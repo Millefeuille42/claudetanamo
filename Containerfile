@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM node:22-bookworm-slim
 
 ARG USER_ID=501
@@ -8,7 +9,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     git \
     curl \
     jq \
-    ripgrep \
+    xz-utils \
     procps \
     iproute2 \
     && rm -rf /var/lib/apt/lists/*
@@ -21,16 +22,21 @@ RUN if getent group ${GROUP_ID} >/dev/null; then \
       groupadd -g ${GROUP_ID} prisoner && EXISTING_GROUP=prisoner; \
     fi && \
     useradd -m -u ${USER_ID} -g ${EXISTING_GROUP} -s /bin/bash prisoner && \
-    mkdir -p /workspace /home/prisoner && \
-    chown -R ${USER_ID}:${GROUP_ID} /workspace /home/prisoner && \
+    mkdir -p /workspace /home/prisoner /nix && \
+    chown -R ${USER_ID}:${GROUP_ID} /workspace /home/prisoner /nix && \
     chmod 755 /home/prisoner
-
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
 
 USER ${USER_ID}:${GROUP_ID}
 WORKDIR /workspace
 ENV HOME=/home/prisoner
-ENV PATH="/usr/local/bin:/home/prisoner/.local/bin:$PATH"
+
+RUN curl -L https://nixos.org/nix/install | sh -s -- --no-daemon
+
+RUN mkdir -p /home/prisoner/.config/nix && \
+    echo "experimental-features = nix-command flakes" >> /home/prisoner/.config/nix/nix.conf
+
+ENV PATH="/home/prisoner/.nix-profile/bin:/home/prisoner/.local/bin:/usr/local/bin:$PATH"
+
+COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
