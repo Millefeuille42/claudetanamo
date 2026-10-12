@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+cell_home() {
+  local project_root="$1" hash
+  hash="$(printf '%s' "${project_root}" | shasum -a 256 | cut -c1-12)"
+  echo "${CLAUDETANAMO_HOME:-${HOME}/Library/Application Support/claudetanamo}/projects/$(basename "${project_root}")-${hash}"
+}
+
 SOURCE_BIN="${BASH_SOURCE[0]}"
 while [[ -L "$SOURCE_BIN" ]]; do
   BIN_DIR="$(cd -P "$(dirname "$SOURCE_BIN")" && pwd)"
@@ -12,18 +18,27 @@ DEFAULTS_DIR="${CLAUDETANAMO_REPO}/defaults"
 
 PROJECT_ROOT="$(pwd)"
 JAIL_DATA_DIR="${PROJECT_ROOT}/.claudetanamo"
+CELL_HOME="$(cell_home "$(pwd -P)")"
+STATE_DIR="${CELL_HOME}/state"
 IMAGE_TAG="claudetanamo:latest"
 
-# the cell can write anywhere under .claudetanamo, so a symlink there could
-# point the chmod or copies below at any host path
-if [[ -n "$(find "${JAIL_DATA_DIR}" -type l -print -quit 2>/dev/null)" ]]; then
-  echo "[-] Symlink found under ${JAIL_DATA_DIR}, refusing to start:" >&2
-  find "${JAIL_DATA_DIR}" -type l >&2
+# state used to live in the project, where backups and cloud sync pick up the credentials
+if [[ -d "${JAIL_DATA_DIR}/state" && ! -L "${JAIL_DATA_DIR}/state" && ! -e "${STATE_DIR}" ]]; then
+  echo "[+] Moving session state to ${STATE_DIR}..."
+  mkdir -p "${CELL_HOME}"
+  mv "${JAIL_DATA_DIR}/state" "${STATE_DIR}"
+fi
+
+# the cell can write anywhere under its state dir, so a symlink there could
+# point the copies below at any host path
+if [[ -n "$(find "${STATE_DIR}" -type l -print -quit 2>/dev/null)" ]]; then
+  echo "[-] Symlink found under ${STATE_DIR}, refusing to start:" >&2
+  find "${STATE_DIR}" -type l >&2
   exit 1
 fi
 
-mkdir -p "${JAIL_DATA_DIR}/state/skills"
-chmod 700 "${JAIL_DATA_DIR}"
+mkdir -p "${STATE_DIR}/skills"
+chmod 700 "${CELL_HOME}"
 
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   GIT_DIR="$(git rev-parse --git-dir)"
@@ -37,22 +52,22 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 fi
 
 if [[ -f "${DEFAULTS_DIR}/CLAUDE.md" ]]; then
-  cp "${DEFAULTS_DIR}/CLAUDE.md" "${JAIL_DATA_DIR}/state/CLAUDE.md"
+  cp "${DEFAULTS_DIR}/CLAUDE.md" "${STATE_DIR}/CLAUDE.md"
 fi
 
 # reseed the default skills
 for skill in "${DEFAULTS_DIR}/skills/"*/; do
   [[ -d "${skill}" ]] || continue
   name="$(basename "${skill}")"
-  rm -rf "${JAIL_DATA_DIR}/state/skills/${name}"
-  cp -R "${skill}" "${JAIL_DATA_DIR}/state/skills/${name}"
+  rm -rf "${STATE_DIR}/skills/${name}"
+  cp -R "${skill}" "${STATE_DIR}/skills/${name}"
 done
 
 RUNTIME_ENV_FLAGS=()
 
 # log in using api key
 if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
-  RUNTIME_ENV_FLAGS+=("-e" "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}")
+  RUNTIME_ENV_FLAGS+=("-e" "ANTHROPIC_API_KEY")
 fi
 
 # verify the anchor exists in pf
@@ -132,10 +147,11 @@ container run -it --rm \
   --cpus 4 \
   --memory 4g \
   -v "${PROJECT_ROOT}":/workspace \
+  -v "${STATE_DIR}":/home/prisoner/.claudetanamo \
   -v "${IPC_DIR}":/run/claudetanamo \
   -w /workspace \
   -e HOME=/home/prisoner \
-  -e CLAUDE_CONFIG_DIR=/workspace/.claudetanamo/state \
+  -e CLAUDE_CONFIG_DIR=/home/prisoner/.claudetanamo \
   -e TERM="${TERM:-xterm-256color}" \
   "${RUNTIME_ENV_FLAGS[@]}" \
   "${IMAGE_TAG}" \

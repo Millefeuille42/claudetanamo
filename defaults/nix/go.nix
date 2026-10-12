@@ -10,7 +10,7 @@ pkgs.mkShell {
   ];
 
   shellHook = ''
-    export GOPATH="$PWD/.claudetanamo/state/go"
+    export GOPATH="$CLAUDE_CONFIG_DIR/go"
     export PATH="$GOPATH/bin:$PATH"
   '';
 }

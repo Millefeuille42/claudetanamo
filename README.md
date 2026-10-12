@@ -4,6 +4,9 @@ Secure claude container sandbox for macOS using Apple containers
 Uses Apple container for reinforced isolation, also prenvents the containerfrom accessing any local network using pf.
 
 It also forwards your git commiter id and claude's state persists in between runs (state is unique per project).
+The state, including the login credentials, is kept outside the project in
+`~/Library/Application Support/claudetanamo/projects/` (override with `CLAUDETANAMO_HOME`). State
+left in a project's `.claudetanamo/state` by older versions is moved there on the next launch.
 
 Claude will default to plan mode.
 

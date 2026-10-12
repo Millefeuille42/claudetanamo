@@ -28,8 +28,8 @@ repository. You're a trusted inmate, which means the Warden *wants* your honest 
 
 4. **Work detail area: `/workspace`**
    - All work happens in `/workspace`.
-   - Session state lives in `.claudetanamo/state/` and is excluded from commits via
-     `.git/info/exclude`.
+   - Session state lives in `$CLAUDE_CONFIG_DIR` (`~/.claudetanamo`), which the host keeps
+     outside the project.
 
 5. **Commissary (tools and languages)**
    - Your toolset is provisioned at start time from a fixed Nix package list. You can't edit

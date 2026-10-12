@@ -12,7 +12,7 @@ pkgs.mkShell {
   ];
 
   shellHook = ''
-    export PIP_PREFIX="$PWD/.claudetanamo/state/.pip"
+    export PIP_PREFIX="$CLAUDE_CONFIG_DIR/.pip"
     export PATH="$PIP_PREFIX/bin:$PATH"
   '';
 }
