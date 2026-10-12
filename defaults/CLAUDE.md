@@ -49,8 +49,11 @@ repository. You're a trusted inmate, which means the Warden *wants* your honest 
 
 ### GIT YARD RULES
 
-- Never commit directly to trunk branches (`main`, `master`, `develop`, `release/*`).
-  The only way your work reaches the main worktree is the fast-forward handoff in step 4.
+- `/workspace` is the cell's own clone of the Warden's repository. The Warden's checkout is
+  mounted read-only at `/project` and is the clone's `origin`.
+- Never commit to or merge into trunk branches (`main`, `master`, `develop`, `release/*`),
+  not even in the clone. Your work reaches the Warden as `claude/*` branches, which the
+  Warden fetches from the clone and merges themselves (step 4).
 - Every branch you create uses the `claude/` prefix, e.g. `claude/fix-auth-timeout`.
 - Never push. No `git push` in any form (including `--force`, `--dry-run`, tags, or pushing to
   a different remote), and no indirect pushes such as `gh pr create`, `gh repo sync`, or other
@@ -62,10 +65,11 @@ repository. You're a trusted inmate, which means the Warden *wants* your honest 
   cell (worktree), set up below.
 
 Shorthand used below:
-- `MAIN` = `/workspace` (the main worktree)
+- `MAIN` = `/workspace` (the clone's main worktree)
 - `COMMON` = output of `git -C /workspace rev-parse --git-common-dir` (shared by all worktrees)
 - `REG` = `$COMMON/claudetanamo/sessions` (registry of active sessions)
-- `LOCK` = `$COMMON/claudetanamo/handoff.lock` (a directory used as a lock)
+- `BASE` = `origin/<branch>`, where `<branch>` is the Warden's current branch
+  (`git -C /project branch --show-current`)
 
 #### 1. Roll call: check for other sessions (start of every session)
 
@@ -74,7 +78,7 @@ Shorthand used below:
    who else is in the block and what they're working on.
 3. If another session's task touches the same files or area as yours, say so and ask the
    Warden how to proceed before writing anything.
-4. Never delete or edit another session's registry file, worktree, branch, or lock. If one
+4. Never delete or edit another session's registry file, worktree, or branch. If one
    looks stale (e.g. its worktree no longer exists or it's hours old), report it to the
    Warden instead of cleaning it up.
 
@@ -84,8 +88,8 @@ Shorthand used below:
    choose a different slug.
 2. Make sure the worktree folder is ignored:
    `grep -qx '.claude/worktrees/' "$COMMON/info/exclude" || echo '.claude/worktrees/' >> "$COMMON/info/exclude"`
-3. Create the worktree from the main worktree's current commit:
-   `git -C "$MAIN" worktree add .claude/worktrees/<slug> -b claude/<slug>`
+3. Create the worktree from the Warden's latest work: `git -C "$MAIN" fetch origin`, then
+   `git -C "$MAIN" worktree add .claude/worktrees/<slug> -b claude/<slug> "$BASE"`
 4. Register yourself: write `$REG/<slug>` containing the start time (UTC), branch, worktree
    path, and a one-line task description.
 5. From here on, do all reads, edits, tests, and commits inside
@@ -133,29 +137,20 @@ Shorthand used below:
 - If you need to pause or the session ends unfinished, leave the worktree and registry file in
   place and tell the Warden the slug so the work can be resumed.
 
-#### 4. Release: hand off to the main worktree (when the task is done)
+#### 4. Release: hand the branch to the Warden (when the task is done)
 
 1. Make sure all work is committed and tests pass in your worktree.
-2. Acquire the handoff lock: `mkdir "$LOCK"` (this is atomic). If it fails, another session is
-   handing off. Wait about 30 seconds and retry, up to 10 times, then report to the Warden.
-   Once acquired, write your slug and the time into `$LOCK/owner`.
-3. With the lock held:
-   - Check the main worktree is clean: `git -C "$MAIN" status --porcelain` must print
-     nothing. If not, release the lock and ask the Warden. Never stash, reset, or discard
-     changes in the main worktree.
-   - Note the main worktree's branch: `git -C "$MAIN" branch --show-current`.
-   - In your worktree, rebase onto it: `git rebase --no-gpg-sign <that-branch>`. If there are conflicts,
-     resolve them only if they're clearly mechanical; otherwise `git rebase --abort`, release
-     the lock, and report the conflicting files to the Warden.
-   - Re-run the tests after a rebase that changed anything.
-   - Fast-forward the main worktree: `git -C "$MAIN" merge --ff-only claude/<slug>`.
-     Never use a non-fast-forward merge, `--force`, or push.
-4. Release the lock: `rm -rf "$LOCK"`. Always release it, including on failure.
+2. Catch up with the Warden: `git -C "$MAIN" fetch origin`, then in your worktree
+   `git rebase --no-gpg-sign "$BASE"`. If there are conflicts, resolve them only if they're
+   clearly mechanical; otherwise `git rebase --abort` and report the conflicting files.
+3. Re-run the tests after a rebase that changed anything.
+4. Don't merge anything yourself. The Warden runs `claudetanamo --fetch` on the host, which
+   brings every `claude/*` branch over as `cell/claude/*`, and does the merging.
 5. Clean up your cell: `git -C "$MAIN" worktree remove .claude/worktrees/<slug>`, then delete
-   your registry file `$REG/<slug>`. Keep the `claude/<slug>` branch unless the Warden says
-   otherwise.
-6. Report: the commits that landed, the branch they landed on, and anything the Warden
-   should double-check.
+   your registry file `$REG/<slug>`. Keep the `claude/<slug>` branch: it's what the Warden
+   fetches.
+6. Report: the branch, its commits, what to test, and anything the Warden should
+   double-check.
 
 ---
 

@@ -20,6 +20,25 @@ Link or copy the `bin/claudetanamo` file into your `PATH`.
 
 Once done run `claudetanamo` in your project directory, you will be prompted to log in if the API KEY is not provided or if the oauth token is not available.
 
+### Getting work back
+
+When `claudetanamo` is started at the top level of a git repository, Claude doesn't work in your
+checkout: it gets its own clone (next to its state), and your checkout is mounted read-only at
+`/project` as the clone's `origin`. This keeps it from planting git hooks or config in your
+`.git` that your own git would then run. The clone catches up with `origin` on every launch;
+uncommitted files are only visible through `/project`.
+
+Claude leaves its work on `claude/*` branches. To bring them over and merge them yourself, run
+in your project:
+
+```
+claudetanamo --fetch                    # fetches claude/* as cell/claude/*
+git merge --ff-only cell/claude/<slug>
+```
+
+Started anywhere else (a subdirectory, or a directory that isn't a repository), the directory is
+mounted read-write as before.
+
 It is possible change from plan mode to RW modes, either when running claude interactively (without any arguments) 
 or by providing any of those two flags `--permission-mode <mode>` or `--dangerously-skip-permissions`.
 

@@ -28,11 +28,22 @@ fi
 
 git config --global --add safe.directory /workspace
 
+SOURCE_DIR=/workspace
+if [[ -d /project ]]; then
+  SOURCE_DIR=/project
+  git config --global --add safe.directory /project
+  if git -C /workspace fetch --quiet origin &&
+     git -C /workspace rev-parse --quiet --verify '@{upstream}' >/dev/null 2>&1; then
+    git -C /workspace merge --quiet --ff-only '@{upstream}' ||
+      echo "[!] /workspace could not be fast-forwarded to origin, continuing as is" >&2
+  fi
+fi
+
 MANIFEST=""
-if [[ -f "/workspace/.claudetanamo/tools.nix" ]]; then
-  MANIFEST="/workspace/.claudetanamo/tools.nix"
-elif [[ -f "/workspace/shell.nix" ]]; then
-  MANIFEST="/workspace/shell.nix"
+if [[ -f "${SOURCE_DIR}/.claudetanamo/tools.nix" ]]; then
+  MANIFEST="${SOURCE_DIR}/.claudetanamo/tools.nix"
+elif [[ -f "${SOURCE_DIR}/shell.nix" ]]; then
+  MANIFEST="${SOURCE_DIR}/shell.nix"
 fi
 
 HAS_PERMISSION_MODE=false

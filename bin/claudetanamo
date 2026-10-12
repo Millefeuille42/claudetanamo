@@ -20,7 +20,19 @@ PROJECT_ROOT="$(pwd)"
 JAIL_DATA_DIR="${PROJECT_ROOT}/.claudetanamo"
 CELL_HOME="$(cell_home "$(pwd -P)")"
 STATE_DIR="${CELL_HOME}/state"
+WORK_DIR="${CELL_HOME}/workspace"
 IMAGE_TAG="claudetanamo:latest"
+
+if [[ "${1:-}" == "--fetch" ]]; then
+  if [[ ! -d "${WORK_DIR}" ]]; then
+    echo "[-] No cell workspace for this project yet" >&2
+    exit 1
+  fi
+  git -c fetch.fsckObjects=true fetch --no-tags --no-recurse-submodules --prune \
+    "${WORK_DIR}" '+refs/heads/claude/*:refs/remotes/cell/claude/*'
+  git branch -r --list 'cell/claude/*'
+  exit 0
+fi
 
 # state used to live in the project, where backups and cloud sync pick up the credentials
 if [[ -d "${JAIL_DATA_DIR}/state" && ! -L "${JAIL_DATA_DIR}/state" && ! -e "${STATE_DIR}" ]]; then
@@ -62,6 +74,25 @@ for skill in "${DEFAULTS_DIR}/skills/"*/; do
   rm -rf "${STATE_DIR}/skills/${name}"
   cp -R "${skill}" "${STATE_DIR}/skills/${name}"
 done
+
+# At a repo's top level the cell gets its own clone instead of the project, whose .git
+# (config, hooks) host git would execute; the project itself is mounted read-only as the
+# clone's origin. The host never runs git inside the clone once the cell has had it.
+if [[ "$(git rev-parse --show-toplevel 2>/dev/null)" == "$(pwd -P)" ]]; then
+  if [[ ! -d "${WORK_DIR}" ]]; then
+    echo "[+] Cloning the project into the cell's workspace..."
+    rm -rf "${WORK_DIR}.tmp"
+    git clone --quiet --no-hardlinks "${PROJECT_ROOT}" "${WORK_DIR}.tmp"
+    git -C "${WORK_DIR}.tmp" remote set-url origin /project
+    mv "${WORK_DIR}.tmp" "${WORK_DIR}"
+  fi
+  WORKSPACE_MOUNTS=(
+    -v "${WORK_DIR}":/workspace
+    --mount "type=bind,source=${PROJECT_ROOT},target=/project,readonly"
+  )
+else
+  WORKSPACE_MOUNTS=(-v "${PROJECT_ROOT}":/workspace)
+fi
 
 RUNTIME_ENV_FLAGS=()
 
@@ -146,7 +177,7 @@ container run -it --rm \
   --cap-drop=ALL \
   --cpus 4 \
   --memory 4g \
-  -v "${PROJECT_ROOT}":/workspace \
+  "${WORKSPACE_MOUNTS[@]}" \
   -v "${STATE_DIR}":/home/prisoner/.claudetanamo \
   -v "${IPC_DIR}":/run/claudetanamo \
   -w /workspace \
