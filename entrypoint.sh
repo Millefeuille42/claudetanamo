@@ -28,6 +28,13 @@ fi
 
 git config --global --add safe.directory /workspace
 
+if [[ -n "${CLAUDETANAMO_GIT_NAME:-}" ]]; then
+  git config --global user.name "${CLAUDETANAMO_GIT_NAME}"
+fi
+if [[ -n "${CLAUDETANAMO_GIT_EMAIL:-}" ]]; then
+  git config --global user.email "${CLAUDETANAMO_GIT_EMAIL}"
+fi
+
 SOURCE_DIR=/workspace
 if [[ -d /project ]]; then
   SOURCE_DIR=/project

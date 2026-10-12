@@ -101,6 +101,13 @@ if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
   RUNTIME_ENV_FLAGS+=("-e" "ANTHROPIC_API_KEY")
 fi
 
+if GIT_USER_NAME="$(git config --get user.name)"; then
+  RUNTIME_ENV_FLAGS+=("-e" "CLAUDETANAMO_GIT_NAME=${GIT_USER_NAME}")
+fi
+if GIT_USER_EMAIL="$(git config --get user.email)"; then
+  RUNTIME_ENV_FLAGS+=("-e" "CLAUDETANAMO_GIT_EMAIL=${GIT_USER_EMAIL}")
+fi
+
 # verify the anchor exists in pf
 if ! sudo pfctl -s Anchors 2>/dev/null | grep -q "claudetanamo"; then
   echo "[!] Loading perimeter rules into pfctl..."
