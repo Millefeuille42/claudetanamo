@@ -27,7 +27,7 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 fi
 
 if [[ -f "${DEFAULTS_DIR}/CLAUDE.md" ]]; then
-  cp -n "${DEFAULTS_DIR}/CLAUDE.md" "${JAIL_DATA_DIR}/state/CLAUDE.md"
+  cp "${DEFAULTS_DIR}/CLAUDE.md" "${JAIL_DATA_DIR}/state/CLAUDE.md"
 fi
 
 if [[ -d "${DEFAULTS_DIR}/skills" ]]; then
