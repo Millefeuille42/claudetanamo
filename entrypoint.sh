@@ -41,8 +41,17 @@ if [[ -d /project ]]; then
   git config --global --add safe.directory /project
   if git -C /workspace fetch --quiet origin &&
      git -C /workspace rev-parse --quiet --verify '@{upstream}' >/dev/null 2>&1; then
-    git -C /workspace merge --quiet --ff-only '@{upstream}' ||
-      echo "[!] /workspace could not be fast-forwarded to origin, continuing as is" >&2
+    if ! git -C /workspace merge --quiet --ff-only '@{upstream}' 2>/dev/null; then
+      branch="$(git -C /workspace symbolic-ref --short HEAD)"
+      if [[ "${branch}" != claude/* &&
+            "$(git -C /workspace rev-parse --abbrev-ref '@{upstream}')" == "origin/${branch}" &&
+            -z "$(git -C /workspace status --porcelain)" ]]; then
+        echo "[+] origin/${branch} was rewritten, moving /workspace from $(git -C /workspace rev-parse --short HEAD) to it"
+        git -C /workspace reset --quiet --hard '@{upstream}'
+      else
+        echo "[!] /workspace could not be fast-forwarded to origin, continuing as is" >&2
+      fi
+    fi
   fi
 fi
 
