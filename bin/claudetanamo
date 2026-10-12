@@ -14,6 +14,14 @@ PROJECT_ROOT="$(pwd)"
 JAIL_DATA_DIR="${PROJECT_ROOT}/.claudetanamo"
 IMAGE_TAG="claudetanamo:latest"
 
+# the cell can write anywhere under .claudetanamo, so a symlink there could
+# point the chmod, copies or skills mount below at any host path
+if [[ -n "$(find "${JAIL_DATA_DIR}" -type l -print -quit 2>/dev/null)" ]]; then
+  echo "[-] Symlink found under ${JAIL_DATA_DIR}, refusing to start:" >&2
+  find "${JAIL_DATA_DIR}" -type l >&2
+  exit 1
+fi
+
 mkdir -p "${JAIL_DATA_DIR}/state/skills"
 chmod 700 "${JAIL_DATA_DIR}"
 
@@ -21,7 +29,9 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   GIT_DIR="$(git rev-parse --git-dir)"
   EXCLUDE_FILE="${GIT_DIR}/info/exclude"
   mkdir -p "$(dirname "${EXCLUDE_FILE}")"
-  if ! grep -qxF "/.claudetanamo" "${EXCLUDE_FILE}" 2>/dev/null; then
+  if [[ -L "$(dirname "${EXCLUDE_FILE}")" || -L "${EXCLUDE_FILE}" ]]; then
+    echo "[!] ${EXCLUDE_FILE} goes through a symlink, not adding /.claudetanamo to it" >&2
+  elif ! grep -qxF "/.claudetanamo" "${EXCLUDE_FILE}" 2>/dev/null; then
     echo "/.claudetanamo" >> "${EXCLUDE_FILE}"
   fi
 fi
