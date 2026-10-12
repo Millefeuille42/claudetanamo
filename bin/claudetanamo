@@ -15,7 +15,7 @@ JAIL_DATA_DIR="${PROJECT_ROOT}/.claudetanamo"
 IMAGE_TAG="claudetanamo:latest"
 
 # the cell can write anywhere under .claudetanamo, so a symlink there could
-# point the chmod, copies or skills mount below at any host path
+# point the chmod or copies below at any host path
 if [[ -n "$(find "${JAIL_DATA_DIR}" -type l -print -quit 2>/dev/null)" ]]; then
   echo "[-] Symlink found under ${JAIL_DATA_DIR}, refusing to start:" >&2
   find "${JAIL_DATA_DIR}" -type l >&2
@@ -40,9 +40,13 @@ if [[ -f "${DEFAULTS_DIR}/CLAUDE.md" ]]; then
   cp "${DEFAULTS_DIR}/CLAUDE.md" "${JAIL_DATA_DIR}/state/CLAUDE.md"
 fi
 
-if [[ -d "${DEFAULTS_DIR}/skills" ]]; then
-  cp -rn "${DEFAULTS_DIR}/skills/"* "${JAIL_DATA_DIR}/state/skills/" 2>/dev/null || true
-fi
+# reseed the default skills
+for skill in "${DEFAULTS_DIR}/skills/"*/; do
+  [[ -d "${skill}" ]] || continue
+  name="$(basename "${skill}")"
+  rm -rf "${JAIL_DATA_DIR}/state/skills/${name}"
+  cp -R "${skill}" "${JAIL_DATA_DIR}/state/skills/${name}"
+done
 
 RUNTIME_ENV_FLAGS=()
 
@@ -129,7 +133,6 @@ container run -it --rm \
   --memory 4g \
   -v "${PROJECT_ROOT}":/workspace \
   -v "${IPC_DIR}":/run/claudetanamo \
-  -v "${JAIL_DATA_DIR}/state/skills":/home/prisoner/.config/claude/skills \
   -w /workspace \
   -e HOME=/home/prisoner \
   -e CLAUDE_CONFIG_DIR=/workspace/.claudetanamo/state \
