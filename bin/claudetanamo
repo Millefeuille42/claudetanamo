@@ -47,44 +47,69 @@ if ! sudo pfctl -s Anchors 2>/dev/null | grep -q "claudetanamo"; then
   sudo pfctl -a claudetanamo -f /etc/pf.anchors/claudetanamo
 fi
 
+if ! sudo pfctl -s info 2>/dev/null | grep -q '^Status: Enabled'; then
+  echo "[-] pf is disabled, run bin/setup.sh or 'sudo pfctl -e' first" >&2
+  exit 1
+fi
+
 # create a temporary IPC directory to receive the guest IP upon boot
 IPC_DIR="$(mktemp -d /tmp/claudetanamo.XXXXXX)"
 chmod 777 "${IPC_DIR}"
 IP_FILE="${IPC_DIR}/guest_ip"
+# host-only record of the jailed IP, so cleanup doesn't trust the guest-writable file
+JAILED_FILE="$(mktemp /tmp/claudetanamo-jailed.XXXXXX)"
 
 cleanup() {
   local exit_code=$?
   local target_ip=""
 
-  if [[ -f "${IP_FILE}" && -s "${IP_FILE}" ]]; then
-    target_ip="$(head -n1 "${IP_FILE}" | tr -d ' \r\n')"
+  if [[ -s "${JAILED_FILE}" ]]; then
+    target_ip="$(head -n1 "${JAILED_FILE}")"
   fi
 
   if [[ -n "${target_ip}" ]]; then
     printf "\n[+] Removing %s from pf jail...\n" "${target_ip}"
-    sudo pfctl -t claudetanamo_inmates -T delete "${target_ip}" 2>/dev/null || true
+    sudo pfctl -a claudetanamo -t claudetanamo_inmates -T delete "${target_ip}" 2>/dev/null || true
   fi
-  rm -rf "${IPC_DIR}"
+  rm -rf "${IPC_DIR}" "${JAILED_FILE}"
   exit "${exit_code}"
 }
 trap cleanup EXIT INT TERM
 
-# in background: read ip from ipc file and send it to pf jail
-(
-  for _ in {1..50}; do
-    if [[ -s "${IP_FILE}" ]]; then
-      FOUND_IP="$(head -n1 "${IP_FILE}" | tr -d ' \r\n')"
-      if [[ -n "${FOUND_IP}" ]]; then
-        printf "[+] Cell IP discovered: %s\n" "${FOUND_IP}"
-        sudo pfctl -t claudetanamo_inmates -T add "${FOUND_IP}" >/dev/null 2>&1 || true
-        break
-      fi
-    fi
+# read the cell IP from the ipc file, jail it, and tell the cell it may start
+jail_cell() {
+  local ip=""
+
+  for _ in {1..300}; do
+    [[ -s "${IP_FILE}" ]] && ip="$(head -n1 "${IP_FILE}" | tr -d ' \r\n')"
+    [[ -n "${ip}" ]] && break
     sleep 0.1
   done
-) &
+
+  if [[ ! "${ip}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+    echo "[-] No valid cell IP reported${ip:+ (got ${ip})}" >&2
+    return 1
+  fi
+  printf "[+] Cell IP discovered: %s\n" "${ip}"
+  echo "${ip}" > "${JAILED_FILE}"
+
+  if ! sudo -n pfctl -a claudetanamo -t claudetanamo_inmates -T add "${ip}" >/dev/null 2>&1 ||
+     ! sudo -n pfctl -a claudetanamo -t claudetanamo_inmates -T test "${ip}" >/dev/null 2>&1; then
+    echo "[-] Could not add ${ip} to the pf jail" >&2
+    return 1
+  fi
+  touch "${IPC_DIR}/jailed"
+}
 
 CONTAINER_LABEL="claudetanamo-$(date +%s)"
+
+(
+  if ! jail_cell; then
+    echo "[-] Stopping ${CONTAINER_LABEL}" >&2
+    container stop "${CONTAINER_LABEL}" >/dev/null 2>&1 || true
+  fi
+) &
+
 echo "[+] Launching session (${CONTAINER_LABEL})..."
 
 container run -it --rm \

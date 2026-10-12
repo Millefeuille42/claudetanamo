@@ -51,7 +51,17 @@ fi
 
 echo "[+] Loading packet filter rules..."
 sudo pfctl -vnf /etc/pf.conf
+sudo pfctl -f /etc/pf.conf
 sudo pfctl -a claudetanamo -f "$ANCHOR_DEST"
 sudo pfctl -e 2>/dev/null || true
+
+# reloading /etc/pf.conf drops the NAT rules vmnet installed for the VMs,
+# so restart the container system to have them rebuilt
+echo "[+] Restarting container system (stops running containers)..."
+container system stop
+container system start
+until container system status >/dev/null 2>&1; do
+  sleep 0.5
+done
 
 echo "=== Setup complete! ==="

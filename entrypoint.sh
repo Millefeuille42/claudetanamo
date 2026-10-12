@@ -8,11 +8,23 @@ if [[ -z "$MY_IP" ]]; then
   MY_IP=$(ip -j -4 addr show dev "$DEFAULT_IF" 2>/dev/null | jq -r '.[0].addr_info[0].local // empty' || true)
 fi
 
-if [[ -d /run/claudetanamo && -n "$MY_IP" ]]; then
+if [[ -d /run/claudetanamo ]]; then
+  if [[ -z "$MY_IP" ]]; then
+    echo "[-] Could not find the cell IP, refusing to start" >&2
+    exit 1
+  fi
   echo "$MY_IP" > /run/claudetanamo/guest_ip
-fi
 
-sleep 0.1
+  # don't touch the network until the host confirms the IP is jailed
+  for _ in {1..300}; do
+    [[ -f /run/claudetanamo/jailed ]] && break
+    sleep 0.1
+  done
+  if [[ ! -f /run/claudetanamo/jailed ]]; then
+    echo "[-] Host did not confirm the firewall, refusing to start" >&2
+    exit 1
+  fi
+fi
 
 git config --global --add safe.directory /workspace
 
