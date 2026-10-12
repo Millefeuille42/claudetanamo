@@ -54,7 +54,6 @@ fi
 
 # create a temporary IPC directory to receive the guest IP upon boot
 IPC_DIR="$(mktemp -d /tmp/claudetanamo.XXXXXX)"
-chmod 777 "${IPC_DIR}"
 IP_FILE="${IPC_DIR}/guest_ip"
 # host-only record of the jailed IP, so cleanup doesn't trust the guest-writable file
 JAILED_FILE="$(mktemp /tmp/claudetanamo-jailed.XXXXXX)"
